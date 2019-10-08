@@ -17,27 +17,27 @@ PATH="$PATH:/home/yourusername/anaconda3/bin"
 
 1. Clone our custom version of the repo with
    ```
-       # cd to the directory you want to work in
-       	 git clone -b uw https://github.com/joshuabrockschmidt/GenRe-ShapeHD.git
-	     cd GenRe-ShapeHD
-	     	```
+   # cd to the directory you want to work in
+   git clone -b uw https://github.com/joshuabrockschmidt/GenRe-ShapeHD.git
+   cd GenRe-ShapeHD
+   ```
 
 1. Create a conda environment named `shaperecon` with necessary dependencies specified in `environment.yml`. In order to make sure trimesh is installed correctly, please run `install_trimesh.sh` after setting up the conda environment.
    ```
-	conda env create -f environment.yml
-	      ./install_trimesh.sh
-		```
-			Note that most scripts activate the `shaperecon` Anaconda environment for you. To activate the environment manually at any time, use
-			     ```
-				source activate shaperecon
-				       ```
+   conda env create -f environment.yml
+   ./install_trimesh.sh
+   ```
+   Note that most scripts activate the `shaperecon` Anaconda environment for you. To activate the environment manually at any time, use
+   ```
+   source activate shaperecon
+   ```
 
 1. The instructions below assume you have activated this environment and built the cuda extension with
    ```
-	source activate shaperecon
-	       ./build_toolbox.sh
-		```
-			We made some slight modifications to this script's child scripts for CUDA compatibility with NVIDIA Tesla P100-SXM2 GPUs.
+   source activate shaperecon
+   ./build_toolbox.sh
+   ```
+ We made some slight modifications to this script's child scripts for CUDA compatibility with NVIDIA Tesla P100-SXM2 GPUs.
 
 Note that due to the deprecation of cffi from pytorch 1.0 and on, this only works for pytorch 0.4.1.
 
