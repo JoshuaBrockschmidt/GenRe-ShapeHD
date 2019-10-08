@@ -47,6 +47,8 @@ class Model(DepthInpaintModel):
         self.init_vars(add_path=True)
         if not self.joint_train:
             self.init_weight(self.net.refine_net)
+        if hasattr(opt, 'output_dir'):
+            self.output_dir = opt.output_dir
 
     def __str__(self):
         string = "Full model of GenRe."
@@ -70,6 +72,49 @@ class Model(DepthInpaintModel):
         loss_data['surface_loss'] = surface_loss.mean().item() * self.opt.surface_weight
         loss_data['loss'] = loss.mean().item()
         return loss, loss_data
+
+    def eval_on_batch(self, batch_i, batch, use_trimesh=True):
+        """Generate a 3D shape for an image and return its loss"""
+        if not use_trimesh:
+            pred = self.predict(batch, load_gt=compute_loss, no_grad=True)
+        else:
+            assert self.opt.batch_size == 1
+            pred = self.forward_with_trimesh(batch, load_gt=True)
+
+        return self.compute_loss(pred)
+
+    def forward_with_trimesh(self, batch, load_gt=False):
+        self.load_batch(batch, include_gt=load_gt)
+        with torch.no_grad():
+            pred_1 = self.net.depth_and_inpaint.net1.forward(self._input)
+        pred_abs_depth = self.net.depth_and_inpaint.get_abs_depth(pred_1, self._input)
+        proj = self.net.depth_and_inpaint.proj_depth(pred_abs_depth)
+        pred_depth = self.net.depth_and_inpaint.base_class.postprocess(pred_1['depth'].detach())
+        silhou = self.net.base_class.postprocess(self._input.silhou).detach()
+        pred_depth = pred_depth.cpu().numpy()
+        pred_depth_minmax = pred_1['depth_minmax'].detach().cpu().numpy()[0, :]
+        silhou = silhou.cpu().numpy()[0, 0, :, :]
+        pack = {'depth': pred_depth, 'depth_minmax': pred_depth_minmax}
+        rendered_sph = util_sph.render_spherical(pack, silhou)[None, None, ...]
+        rendered_sph = torch.from_numpy(rendered_sph).float().cuda()
+        rendered_sph = sph_pad(rendered_sph)
+        with torch.no_grad():
+            out2 = self.net.depth_and_inpaint.net2(rendered_sph)
+        pred_proj_sph = self.net.backproject_spherical(out2['spherical'])
+        pred_proj_sph = torch.transpose(pred_proj_sph, 3, 4)
+        pred_proj_sph = torch.flip(pred_proj_sph, [3])
+        proj = torch.transpose(proj, 3, 4)
+        proj = torch.flip(proj, [3])
+
+        refine_input = torch.cat((pred_proj_sph, proj), dim=1)
+        with torch.no_grad():
+            pred_voxel = self.net.refine_net(refine_input)
+        pred_1['pred_sph_full'] = out2['spherical']
+        pred_1['pred_sph_partial'] = rendered_sph
+        pred_1['pred_proj_depth'] = proj
+        pred_1['pred_voxel'] = pred_voxel.flip([3]).transpose(3, 4)
+        pred_1['pred_proj_sph_full'] = pred_proj_sph
+        return pred_1
 
     def pack_output(self, pred, batch, add_gt=True):
         pack = {}
@@ -172,14 +217,17 @@ class Model_test(Model):
         out_dict = cls.preprocess(in_dict, mode='test')
         return out_dict
 
-    def test_on_batch(self, batch_i, batch, use_trimesh=True):
+    def test_on_batch(self, batch_i, batch, use_trimesh=True, compute_loss=False):
         outdir = join(self.output_dir, 'batch%04d' % batch_i)
         makedirs(outdir, exist_ok=True)
         if not use_trimesh:
-            pred = self.predict(batch, load_gt=False, no_grad=True)
+            pred = self.predict(batch, load_gt=compute_loss, no_grad=True)
         else:
             assert self.opt.batch_size == 1
-            pred = self.forward_with_trimesh(batch)
+            pred = self.forward_with_trimesh(batch, load_gt=compute_loss)
+
+        if compute_loss:
+            print('loss: {}'.format(self.compute_loss(pred)))
 
         output = self.pack_output(pred, batch, add_gt=False)
         self.visualizer.visualize(output, batch_i, outdir)
@@ -199,8 +247,8 @@ class Model_test(Model):
             pack['gt_voxel'] = batch['voxel'].numpy()
         return pack
 
-    def forward_with_trimesh(self, batch):
-        self.load_batch(batch, include_gt=False)
+    def forward_with_trimesh(self, batch, load_gt=False):
+        self.load_batch(batch, include_gt=load_gt)
         with torch.no_grad():
             pred_1 = self.net.depth_and_inpaint.net1.forward(self._input)
         pred_abs_depth = self.net.depth_and_inpaint.get_abs_depth(pred_1, self._input)
